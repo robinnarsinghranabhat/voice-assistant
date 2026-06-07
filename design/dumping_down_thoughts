@@ -1,0 +1,26 @@
+
+
+
+I wanted to think about a problem from FIRST PRINCIPLES. But have some knowledge gaps. This file is just my stream of thinking. This will have some gaps and obvious mistakes. Help me thinking this through and architect this thing.
+
+## Goal
+Imagine that I am reading a book at night in a low-light setting. Say, I have a program running. This program is always turned on. A live process ?? 
+
+And as i am reading, if there is a wakeword, like, Hey Claude, I want the program to be active. Give me a quick response. like. 
+"Please Ask."
+
+Now there's a lot of possibilities. I know it's a solved problem but I want to learn to do this myself. Say, now, I can ask, can you make note on this topic.
+
+AI could ask back Clarifying question. Well that depends on my prompting. Still, After minimal back and forth, and say I have connected it to use skills (cli tools) and configure beforehand for agent on tools and accesses. like notion or google-docs or whatever. 
+
+Maybe as i am reading book, I ask it, what does "Empirisicm" mean ? Then it's like, can you give more context. then i say, "I am reading this book by David Deutsh" and I don't understand this part .. And then it gives me back answers. And meanwhile, we have option of keeping notes of that in a notions page or google docs. 
+
+Or, Can you email this person. For the time being, this process is running in a laptop. Idk if it should be a web-app or electron like app.  i wonder how can this be made for an IOS app. Have to consider about that as well.
+
+Idk if I can ask Siri to ping to this IOS app and do things I am mentioning. or keep that ios open. idk how apple supports this. Laptop would be fine for time being. But considering an architecture that would be extendible would be great. 
+
+Talking about architecture, I wonder how this program would work. So it would be con listening to "stream of inputs" from microphone. Then Identify the wakeword.
+
+One thing I consider is usability. Say I ask it for saving Notion. Then AI would go into that tool-calling loop. I might interrupt AI to cancel that. Maybe that's overcomplicating stuffs. like how interaction with claude happens right. 
+
+That would mean, as a "harness" is running, It would also be actively listening to voice inputs. Wonder, how asnychronous aspects work here. For example, when we make web api call, if we are waiting on data to arrive in socket "from other side", another async function runs and there's a cooperative multitasking. I wonder, in my case, since there's a mic input that's continously streaming information. Is there asnychronous aspect between a "function" that keeps on checking for wake-word and a separate "function" where AI will run. For example, if AI function is running after some user input, and user say, said something else as well. Program would have to respond with, like human, let me save this quick. And then get back. 
