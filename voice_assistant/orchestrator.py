@@ -3,6 +3,7 @@ import time
 
 import numpy as np
 
+from voice_assistant.audio_playback import play_audio
 from voice_assistant.debug_utils import save_captured_audio
 from voice_assistant.ring_buffer import RingBuffer
 from voice_assistant.vad import VADResult
@@ -35,10 +36,12 @@ class Orchestrator:
         ring_buffer: RingBuffer,
         wake_word: WakeWordDetector,
         debug: bool = False,
+        greeting_audio: str | None = None,
     ):
         self.state = State.IDLE
         self._ring_buffer = ring_buffer
         self._wake_word = wake_word
+        self._greeting_audio = greeting_audio
         self._recording: list[np.ndarray] = []
         self._last_speech_time: float = 0.0
         self._state_entered_time: float = time.monotonic()
@@ -46,8 +49,17 @@ class Orchestrator:
         self._consecutive_silence: int = 0
         self._lookback_fed: bool = False
         self._debug = debug
+        self._playback_guard_until: float = 0.0
+
+    def notify_playback_start(self, duration_s: float):
+        self._playback_guard_until = time.monotonic() + duration_s
+
+    def _is_playback_active(self) -> bool:
+        return time.monotonic() < self._playback_guard_until
 
     def on_audio(self, vad_result: VADResult | None, chunk: np.ndarray):
+        if self._is_playback_active():
+            return
         if self.state == State.IDLE:
             if vad_result is not None:
                 self._handle_idle(vad_result, chunk)
@@ -63,6 +75,13 @@ class Orchestrator:
         print(f"  [{self.state.value}] → [{new_state.value}]")
         self.state = new_state
         self._state_entered_time = time.monotonic()
+
+    def _on_wake_word_detected(self):
+        if self._greeting_audio:
+            play_audio(
+                self._greeting_audio,
+                on_start=lambda dur: self.notify_playback_start(dur),
+            )
 
     def _handle_idle(self, result: VADResult, chunk: np.ndarray):
         if result.is_speech:
@@ -93,6 +112,8 @@ class Orchestrator:
         detected = self._wake_word.process(chunk)
         if detected:
             print("Wake word detected!")
+            time.sleep(1)
+            self._on_wake_word_detected()
             self._transition(State.WAITING_FOR_USER)
             return
 

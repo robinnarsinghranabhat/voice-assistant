@@ -1,152 +1,102 @@
 # Voice Assistant — State Machine
 
-Every detail matters: what VAD does in each state, what audio goes where,
-what triggers transitions, and what happens to in-flight work on interrupts.
+## Current Implementation
 
-## Primary State Machine
+```
+IDLE → LISTENING → WAITING_FOR_USER → CAPTURING → IDLE
+```
 
 ```mermaid
 stateDiagram-v2
     direction TB
-
     [*] --> IDLE
 
     state IDLE {
-        direction LR
         note right of IDLE
-            AEC: inactive (TTS not playing)
-            Ring Buffer: always writing last 500ms
-            VAD: running on raw mic chunks
-            Wake Word: runs ONLY when VAD says "yes"
-            Audio path: Mic → RingBuffer + VAD → [if yes] → WakeWord
+            Ring Buffer: always writing (all mic chunks)
+            VAD: running, counting consecutive speech frames
+            Wake Word: inactive (saves compute)
+            Transition: N consecutive VAD speech frames → LISTENING
         end note
     }
 
-    state ACKNOWLEDGING {
-        direction LR
-        note right of ACKNOWLEDGING
-            AEC: ACTIVE (TTS is playing "Go ahead")
-            VAD: running on AEC-cleaned signal, but IGNORED
-            Ring Buffer: writing AEC-cleaned audio
-            TTS: playing short acknowledgment
-            Purpose: give user feedback that system heard wake word
-            Duration: ~500ms-1s
+    state LISTENING {
+        note right of LISTENING
+            On entry: feed ring buffer lookback to wake word model
+            Then: feed every incoming audio chunk to wake word
+            VAD: tracks consecutive silence for timeout
+            Transition (success): wake word detected → play greeting → WAITING_FOR_USER
+            Transition (timeout): M consecutive silence frames → reset wake word → IDLE
         end note
     }
 
     state WAITING_FOR_USER {
-        direction LR
         note right of WAITING_FOR_USER
-            AEC: inactive (TTS done)
-            VAD: running on raw mic, ACTIVE — waiting for user to speak
-            Ring Buffer: writing raw mic audio
-            Key: first VAD "yes" triggers transition
-            Timeout: if no speech for ~15s → back to IDLE
-            Why ring buffer matters here: user may start
-            speaking 200-300ms BEFORE VAD detects it.
-            The ring buffer preserves that clipped beginning.
+            Playback guard: ignores all audio while greeting plays
+            VAD: counting consecutive speech frames
+            Transition: N consecutive speech frames → grab lookback → CAPTURING
+            Transition: timeout (10s no speech) → IDLE
         end note
     }
 
     state CAPTURING {
-        direction LR
         note right of CAPTURING
-            AEC: inactive (TTS not playing)
-            VAD: running — watching for SILENCE to know user stopped
-            Recording: ring buffer lookback (last ~300ms) + live mic
-            End condition: VAD says "no" for 1.5-2s continuously
-            Edge case: user pauses mid-sentence for 1s to think.
-            Too-short silence threshold = premature cutoff.
-            Too-long = sluggish response. 1.5-2s is typical.
+            Recording: ring buffer lookback + all live chunks
+            VAD: watching for sustained silence
+            Transition: 1.5s continuous silence → finalize recording → IDLE
+            Debug mode: saves captured audio as .wav
         end note
     }
 
-    state PROCESSING {
-        direction LR
-        state "STT (Whisper)" as stt
-        state "LLM (Claude)" as llm
-        state "Tool Execution" as tools
-        state "Response TTS" as tts_response
-
-        stt --> llm : transcript text
-        llm --> tools : tool calls (if any)
-        tools --> llm : tool results
-        llm --> tts_response : response text (streamed)
-
-        note right of PROCESSING
-            AEC: ACTIVE during tts_response sub-state
-            VAD: running on AEC-cleaned signal during TTS
-            Ring Buffer: writing AEC-cleaned audio during TTS
-            
-            During STT/LLM/Tools (no TTS playing):
-              AEC inactive, VAD on raw mic
-            During Response TTS:
-              AEC active, VAD on cleaned signal
-              VAD "yes" here = potential user interrupt
-        end note
-    }
-
-    state INTERRUPTED {
-        direction LR
-        note right of INTERRUPTED
-            TTS: stopped immediately
-            AEC: transitions to inactive (TTS stopped)
-            Current LLM/tool work: depends on sub-state
-              - If mid-TTS: just stop speaking
-              - If mid-tool-call: let it finish in background,
-                but don't TTS the result
-              - If mid-LLM: cancel the API call
-            Then: treat interrupt audio as new utterance
-            Ring buffer has the start of what user said
-        end note
-    }
-
-    IDLE --> ACKNOWLEDGING : wake word confirmed
-    ACKNOWLEDGING --> WAITING_FOR_USER : TTS playback done
-    WAITING_FOR_USER --> IDLE : timeout (15s no speech)
-    WAITING_FOR_USER --> CAPTURING : VAD detects speech
-    CAPTURING --> PROCESSING : silence for ~2s (utterance complete)
-    PROCESSING --> WAITING_FOR_USER : response done + multi-turn
-    PROCESSING --> IDLE : response done + conversation over
-    PROCESSING --> INTERRUPTED : VAD on cleaned signal during TTS
-    INTERRUPTED --> CAPTURING : start capturing interrupt utterance
+    IDLE --> LISTENING : VAD confirms speech (consecutive frames)
+    LISTENING --> WAITING_FOR_USER : wake word detected
+    LISTENING --> IDLE : silence timeout
+    WAITING_FOR_USER --> CAPTURING : VAD confirms speech
+    WAITING_FOR_USER --> IDLE : 10s timeout
+    CAPTURING --> IDLE : 1.5s silence
 ```
 
-## What VAD Does in Every State (Summary Table)
+## Key Design Decisions
+
+### VAD-gated wake word (not always-on)
+Wake word model only runs after VAD confirms speech. Saves compute
+and avoids false triggers from background noise. Trade-off: adds
+~160-320ms latency before wake word processing starts. Lookback from
+ring buffer recovers the audio from before VAD confirmed.
+
+### Playback guard (not AEC)
+When system plays audio (greeting), all audio processing is paused
+for the duration. Simple and effective for short clips. No echo
+cancellation needed for v1.
+
+### Consecutive frame confirmation
+Both IDLE→LISTENING and WAITING_FOR_USER→CAPTURING require multiple
+consecutive VAD speech frames before transitioning. Prevents single
+noisy frames from triggering state changes.
+
+## Tunable Parameters
 
 ```
-┌──────────────────────┬──────────────┬─────────────────────────┬──────────────────────┐
-│ State                │ AEC Active?  │ VAD Input               │ VAD Output Used For  │
-├──────────────────────┼──────────────┼─────────────────────────┼──────────────────────┤
-│ IDLE                 │ No           │ Raw mic                 │ Gate wake word model │
-│ ACKNOWLEDGING        │ YES          │ AEC-cleaned signal      │ Ignored (AI talking) │
-│ WAITING_FOR_USER     │ No           │ Raw mic                 │ Trigger capture      │
-│ CAPTURING            │ No           │ Raw mic                 │ Detect end-of-speech │
-│ PROCESSING (no TTS)  │ No           │ Raw mic                 │ Detect interrupt     │
-│ PROCESSING (TTS)     │ YES          │ AEC-cleaned signal      │ Detect interrupt     │
-│ INTERRUPTED          │ No (TTS off) │ Raw mic                 │ Continue to CAPTURING│
-└──────────────────────┴──────────────┴─────────────────────────┴──────────────────────┘
+VAD_CONFIRM_FRAMES = 10       # consecutive speech frames to trigger LISTENING
+WAKE_WORD_LOOKBACK_MS = 2000  # audio history fed to wake word on entry
+SILENCE_RESET_FRAMES = 30     # consecutive silence frames to abandon LISTENING
+CAPTURE_CONFIRM_FRAMES = 20   # consecutive speech frames to start CAPTURING
+CAPTURE_LOOKBACK_MS = 500     # audio history prepended to recording
+SILENCE_TIMEOUT_S = 1.5       # silence duration to finalize capture
+IDLE_TIMEOUT_S = 10.0         # timeout in WAITING_FOR_USER
 ```
 
-## Edge Cases & Open Questions
+## Future: Full Pipeline States
 
-1. **Multi-turn detection**: How does the LLM signal "I expect a follow-up" vs
-   "conversation is done"? Options:
-   - LLM explicitly returns a `expects_reply: bool` field
-   - Default to multi-turn, timeout to IDLE after 15s silence
-   - User says "thanks" or "that's all" → IDLE
+When STT + LLM + TTS are added, the state machine extends:
 
-2. **Overlapping tool calls**: If user asks "save this to Notion and email it to John",
-   LLM may issue two tool calls. Both should run in parallel. If user interrupts
-   mid-execution, do we cancel both? Let both finish? Cancel unfired ones only?
-   Recommendation: let in-flight tool calls finish, cancel queued ones.
+```
+CAPTURING → PROCESSING → RESPONDING → WAITING_FOR_USER (multi-turn)
+                                    → IDLE (conversation done)
 
-3. **Wake word vs interrupt**: In IDLE, we require wake word. In PROCESSING (during TTS),
-   do we require wake word to interrupt, or just any speech? Trade-off:
-   - Require wake word: more reliable, fewer false interrupts, slightly annoying
-   - Any speech: natural UX, but false positives from ambient noise
-   Recommendation for v1: require wake word to interrupt.
+RESPONDING + user interrupt → INTERRUPTED → CAPTURING
+```
 
-4. **Self-hearing during ACKNOWLEDGING**: The "Go ahead" TTS is short (~500ms).
-   AEC handles it, but there's a brief window. If AEC isn't perfect, could
-   "Go ahead" trigger VAD → wake word? Low risk (it's short), but worth noting.
+PROCESSING: STT transcribes captured audio, sends to LLM.
+RESPONDING: TTS plays LLM response. AEC may be needed here if we
+want interrupt detection during playback (vs. simpler playback guard).

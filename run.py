@@ -1,3 +1,4 @@
+import os
 import queue
 import signal
 import threading
@@ -18,10 +19,13 @@ def main():
         model_path="/Users/rranabha/red_hat_repos/clawbench/voice_research/.venv/lib/python3.12/site-packages/openwakeword/resources/models/alexa_v0.1.onnx"
     )
     audio_capture = AudioCapture(sample_rate=SAMPLE_RATE)
+    greeting = os.path.join(os.path.dirname(__file__), "hello.mp3")
     orchestrator = Orchestrator(
-        ring_buffer=ring_buffer, 
+        ring_buffer=ring_buffer,
         wake_word=wake_word,
-        debug=True)
+        debug=True,
+        greeting_audio=greeting,
+    )
 
     event_queue: queue.Queue = queue.Queue()
 
