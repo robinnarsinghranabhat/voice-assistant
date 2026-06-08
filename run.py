@@ -3,9 +3,14 @@ import queue
 import signal
 import threading
 
+import numpy as np
+
+from voice_assistant.ai_agent import ClaudeChat
 from voice_assistant.audio_capture import AudioCapture
 from voice_assistant.orchestrator import Orchestrator
 from voice_assistant.ring_buffer import RingBuffer
+from voice_assistant.stt import OpenAISTT
+from voice_assistant.tts import OpenAITTS
 from voice_assistant.vad import VoiceActivityDetector
 from voice_assistant.wake_word import WakeWordDetector
 
@@ -20,11 +25,34 @@ def main():
     )
     audio_capture = AudioCapture(sample_rate=SAMPLE_RATE)
     greeting = os.path.join(os.path.dirname(__file__), "hello.mp3")
+
+    stt = OpenAISTT()
+    chat = ClaudeChat()
+    tts = OpenAITTS()
+
+    def handle_capture(
+        recording: list[np.ndarray],
+        sample_rate: int,
+        interrupt: threading.Event,
+    ):
+        text = stt.transcribe(recording, sample_rate)
+        print(f"  [USER] {text}")
+        if interrupt.is_set() or not text.strip():
+            return
+        print("  [ASSISTANT] ", end="", flush=True)
+        for sentence in chat.stream(text, interrupt):
+            if interrupt.is_set():
+                break
+            print(sentence, end=" ", flush=True)
+            tts.speak(sentence, interrupt)
+        print()
+
     orchestrator = Orchestrator(
         ring_buffer=ring_buffer,
         wake_word=wake_word,
         debug=True,
         greeting_audio=greeting,
+        on_capture_complete=handle_capture,
     )
 
     event_queue: queue.Queue = queue.Queue()

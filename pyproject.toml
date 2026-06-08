@@ -5,10 +5,12 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "anthropic[vertex]>=0.107.1",
     "ipykernel>=7.2.0",
     "jupyterplot>=0.0.3",
     "matplotlib>=3.10.9",
     "numpy>=2.4.6",
+    "openai>=2.41.0",
     "openwakeword>=0.4.0",
     "pyaudio>=0.2.14",
     "silero-vad>=6.2.1",
