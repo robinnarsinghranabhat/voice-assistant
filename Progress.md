@@ -70,6 +70,7 @@ IDLE → LISTENING → WAITING_FOR_USER → CAPTURING → PROCESSING → WAITING
 ### Phase 5: Polish
 - Echo cancellation for speaker mode (currently requires airpods)
 - Tool calling via LLM (the `ChatAgent` protocol supports this — implementation in `ClaudeChat`)
-- Custom wake word training for interrupt (instead of reusing "Alexa")
+- **Interrupt phrases**: Support natural stop phrases ("please stop", "ok stop", "got it", "never mind") as interrupt triggers during PROCESSING, instead of requiring the wake word. Could use a lightweight keyword spotter or small STT model running on the interrupt audio.
+- **Separate wake word for interrupt**: Train a custom wake word model specifically for interrupts (e.g. "stop") — distinct from the conversation-start wake word ("Alexa")
 - Configurable wake word
 - Conversation history truncation for long sessions
