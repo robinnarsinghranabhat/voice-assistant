@@ -1,5 +1,33 @@
 # Voice Assistant
 
+Tested on macOS.
+
+## Quickstart
+
+```bash
+# 1. Install system dependency (macOS)
+brew install portaudio
+
+# 2. Install Python dependencies
+uv sync
+
+# 3. Download wake word model
+uv run python -c "from openwakeword.utils import download_models; download_models()"
+
+# 4. Set environment variables
+export OPENAI_API_KEY="sk-..."                          # for Whisper STT + TTS
+export ANTHROPIC_VERTEX_PROJECT_ID="your-gcp-project-id" # for Claude AI agent
+export CLOUD_ML_REGION="us-east5"                        # optional, defaults to us-east5
+
+# 5. Authenticate with Google Cloud (for Claude via Vertex AI)
+gcloud auth application-default login
+
+# 6. Run
+uv run python run.py
+```
+
+Say "Alexa" to start, speak your question, and the assistant will respond via voice. The conversation sustains — just keep talking. Say "Alexa" again to interrupt the assistant mid-response.
+
 ## Setup
 
 - Package manager: `uv`
