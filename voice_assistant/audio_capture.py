@@ -29,6 +29,7 @@ class AudioCapture:
         self._running = True
 
         while self._running:
+            ## REMOVE-LATER : Does Thread Gives up here while reading ?  
             raw = self._stream.read(self._chunk_size, exception_on_overflow=False)
             chunk = np.frombuffer(raw, dtype=np.int16)
             callback(chunk)

@@ -21,7 +21,7 @@ class State(enum.Enum):
 
 
 LOOKBACK_MS = 300
-SILENCE_TIMEOUT_S = 1.5
+SILENCE_TIMEOUT_S = 3
 IDLE_TIMEOUT_S = 10.0
 SAMPLE_RATE = 16000
 VAD_CONFIRM_FRAMES = 10 # Look at 512 * 10 Frames
@@ -94,6 +94,8 @@ class Orchestrator:
             )
 
     def _handle_idle(self, result: VADResult, chunk: np.ndarray):
+        # Gate: only enter LISTENING after sustained speech, not a single noisy frame.
+        # Wake word model stays off here to save compute.
         if result.is_speech:
             print(result)
             self._consecutive_speech += 1
@@ -108,6 +110,10 @@ class Orchestrator:
             self._transition(State.LISTENING)
 
     def _handle_listening(self, vad_result: VADResult | None, chunk: np.ndarray):
+        # Lookback-then-realtime: VAD confirmation takes ~320ms, so the wake word
+        # likely started before we entered LISTENING. First, replay the last 2s from
+        # the ring buffer through the wake word model. If that doesn't find it,
+        # switch to scanning live chunks as they arrive.
         if not self._lookback_fed:
             self._lookback_fed = True
             lookback = self._ring_buffer.read_last(WAKE_WORD_LOOKBACK_MS)
@@ -126,6 +132,8 @@ class Orchestrator:
             self._transition(State.WAITING_FOR_USER)
             return
 
+        # VAD result is None 3 out of 4 chunks (accumulating to 512 samples).
+        # Only update silence tracking when we have an actual VAD decision.
         if vad_result is not None:
             if vad_result.is_speech:
                 self._consecutive_silence = 0
@@ -138,6 +146,9 @@ class Orchestrator:
                 self._transition(State.IDLE)
 
     def _handle_waiting(self, result: VADResult):
+        # Wake word was detected. Wait for the user to actually start speaking.
+        # Lookback from ring buffer captures the start of their utterance that
+        # arrived before VAD confirmed speech.
         now = time.monotonic()
 
         if result.is_speech:
@@ -154,11 +165,16 @@ class Orchestrator:
             self._transition(State.CAPTURING)
             return
 
+        # After IDLE_TIMEOUT_S seconds, automatically switch to IDLE mode 
         if now - self._state_entered_time > IDLE_TIMEOUT_S:
             print("No speech detected, going back to idle.")
             self._transition(State.IDLE)
 
     def _handle_capturing(self, vad_result: VADResult | None, chunk: np.ndarray):
+        # Keep on appending new chunks to recording. When silence holds for SILENCE_TIMEOUT_S, hand off
+        # the recording to a processing thread (STT → Claude → TTS) and move to
+        # PROCESSING. The processing thread runs on its own — Threads 1+2 keep
+        # capturing mic and running the orchestrator so we can detect interrupts.
         self._recording.append(chunk)
         now = time.monotonic()
 
@@ -202,6 +218,9 @@ class Orchestrator:
         self._processing_done = True
 
     def _handle_processing(self, vad_result: VADResult | None, chunk: np.ndarray):
+        # While Thread 4 runs STT → Claude → TTS, this handler keeps listening
+        # for the wake word so the user can interrupt mid-response.
+        # Same lookback-then-realtime pattern as _handle_listening.
         if self._processing_done:
             self._wake_word.reset()
             self._consecutive_speech = 0

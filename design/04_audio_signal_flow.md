@@ -9,7 +9,8 @@ VAD (Silero):     needs float32 normalized [-1.0, 1.0], 512-sample frames
                   Conversion: int16 → float32 / 32768.0 (done in vad.py)
 Wake word (OWW):  int16, 1280-sample chunks (80ms at 16kHz)
                   Accumulates internally, predicts per chunk
-Captured audio:   list of int16 numpy arrays → concatenated for .wav export
+Captured audio:   list of int16 numpy arrays → concatenated for STT
+TTS output:       PCM 24kHz, 16-bit, mono → streamed direct to PyAudio
 ```
 
 ## Signal Path Per Chunk
@@ -18,12 +19,13 @@ Captured audio:   list of int16 numpy arrays → concatenated for .wav export
 Mic hardware
   │
   ▼
-AudioCapture.read(128 samples)     ← blocks ~8ms
+AudioCapture.read(128 samples)     ← blocks ~8ms waiting for hardware (GIL released)
   │
-  ├──→ RingBuffer.write(chunk)     ← always, every chunk
+  ├──→ RingBuffer.write(chunk)     ← always, every chunk. Lock held for microseconds.
   │
   ├──→ VAD.process(chunk)          ← accumulates 4 chunks (512 samples)
-  │      │                            returns None until 512 accumulated
+  │      │                            returns None until 512 accumulated.
+  │      │                            Every 4th call: torch inference (GIL released).
   │      ▼
   │    VADResult or None
   │
@@ -32,10 +34,11 @@ AudioCapture.read(128 samples)     ← blocks ~8ms
          ▼
        Orchestrator.on_audio(vad_result, chunk)
          │
-         ├── IDLE:     count VAD speech frames only (ignore chunk)
-         ├── LISTENING: feed chunk to wake word (every chunk!)
-         ├── WAITING:  count VAD speech frames only
-         └── CAPTURING: append chunk to recording
+         ├── IDLE:       count VAD speech frames only (ignore chunk)
+         ├── LISTENING:  feed chunk to wake word (every chunk!)
+         ├── WAITING:    count VAD speech frames only
+         ├── CAPTURING:  append chunk to recording
+         └── PROCESSING: listen for wake word (interrupt detection)
 ```
 
 ## Ring Buffer Detail
@@ -75,7 +78,7 @@ Chunk 3 (128) → accumulator [384]  → None
 Chunk 4 (128) → accumulator [512]  → VADResult(is_speech, confidence)
                  accumulator reset
 
-This means: one VAD decision every 32ms.
+One VAD decision every 32ms.
 Orchestrator gets 4 chunks per VAD result (3 with None, 1 with result).
 ```
 
