@@ -47,29 +47,11 @@ IDLE → LISTENING → WAITING_FOR_USER → CAPTURING → PROCESSING → WAITING
 
 ### Response TTS (Phase 4 — done)
 - **OpenAITTS**: OpenAI TTS API, streams raw PCM (24kHz, 16-bit, mono) directly to PyAudio
+- **PocketTTS**: Local [PocketTTS.cpp](https://github.com/VolgaGerm/PocketTTS.cpp) server, streams 32-bit float PCM from `/tts` endpoint
 - No temp files — audio plays as bytes arrive from the API
 - Interrupt support: checks `threading.Event` between audio chunks
-- Swappable via `TTS` Protocol
+- Swappable via `TTS` Protocol, selected by `TTS_BACKEND` env var (`pocket` or `openai`)
 - New module: `voice_assistant/tts.py`
-
-### Interrupt Support (done)
-- Wake word detection continues during PROCESSING via VAD-gated wake word with ring buffer lookback
-- Interrupt cancels LLM streaming (per-token check) and TTS playback (per-chunk check)
-- 2-second cooldown prevents false triggers from tail-end speech
-
-### Bugs Fixed Along the Way
-- Ring buffer wrap-around logic was broken (shape mismatch on write)
-- openWakeWord installed version uses `wakeword_model_paths` (not `wakeword_models`) and `models` (not `MODELS`)
-- Wake word prediction_buffer empty on first frames — added guard
-- Wake word only seeing 25% of audio in LISTENING (only VAD-triggered chunks were forwarded) — fixed by sending all chunks
-- False wake word triggers during PROCESSING from captured speech tail — fixed with wake word reset + cooldown
-- False wake word triggers during TTS playback — fixed with VAD gating (only feed speech-confirmed audio to wake word)
-
-## What's Next
-
-### Local TTS ([PocketTTS.cpp](https://github.com/VolgaGerm/PocketTTS.cpp))
-- Add pocket-tts running in streaming-server mode as a local TTS backend
-- Compare latency vs OpenAI TTS API (log timestamps already in place)
 
 #### Running pocket-tts server
 ```bash
@@ -88,6 +70,21 @@ curl -s http://localhost:9000/v1/audio/speech \
 - `input` — text to speak
 - `response_format` — `wav` (default) or `pcm`
 
+### Interrupt Support (done)
+- Wake word detection continues during PROCESSING via VAD-gated wake word with ring buffer lookback
+- Interrupt cancels LLM streaming (per-token check) and TTS playback (per-chunk check)
+- 2-second cooldown prevents false triggers from tail-end speech
+
+### Bugs Fixed Along the Way
+- Ring buffer wrap-around logic was broken (shape mismatch on write)
+- openWakeWord installed version uses `wakeword_model_paths` (not `wakeword_models`) and `models` (not `MODELS`)
+- Wake word prediction_buffer empty on first frames — added guard
+- Wake word only seeing 25% of audio in LISTENING (only VAD-triggered chunks were forwarded) — fixed by sending all chunks
+- False wake word triggers during PROCESSING from captured speech tail — fixed with wake word reset + cooldown
+- False wake word triggers during TTS playback — fixed with VAD gating (only feed speech-confirmed audio to wake word)
+
+## What's Next
+
 ### Voice UX Improvements
 - First sentence should be spoken immediately (low time-to-first-audio), then bundle subsequent sentences into fewer TTS calls to reduce per-sentence API overhead
 - Echo cancellation for speaker mode (currently requires airpods)
@@ -103,7 +100,7 @@ curl -s http://localhost:9000/v1/audio/speech \
 - All backends (STT, LLM, TTS) use `typing.Protocol` — keep this as new backends are added
 - LLM: add OpenAI (GPT), local models (ollama/llama.cpp) as `ChatAgent` implementations
 - STT: OpenAI Whisper API and FasterWhisper (local) already swappable
-- TTS: OpenAI API done, pocket-tts (local) next
+- TTS: OpenAI API and PocketTTS (local) already swappable
 - Tool calling should work across LLM backends via the `ChatAgent` protocol
 
 ### Phase 5: Polish
