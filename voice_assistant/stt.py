@@ -28,6 +28,8 @@ def recording_to_wav_bytes(recording: list[np.ndarray], sample_rate: int) -> byt
 
 
 class OpenAISTT:
+    _label = "OpenAISTT"
+
     def __init__(self, model: str = "whisper-1"):
         from openai import OpenAI
 
@@ -44,11 +46,13 @@ class OpenAISTT:
             file=wav_file,
         )
         elapsed = time.monotonic() - t0
-        log.info("OpenAI transcribed in %.2fs: %s", elapsed, transcript.text)
+        log.info("[%s] transcribed in %.2fs: %s", self._label, elapsed, transcript.text)
         return transcript.text
 
 
 class FasterWhisperSTT:
+    _label = "FasterWhisperSTT"
+
     def __init__(
         self,
         model_size: str = "base",
@@ -65,5 +69,5 @@ class FasterWhisperSTT:
         segments, _ = self._model.transcribe(audio, beam_size=5)
         text = " ".join(seg.text.strip() for seg in segments)
         elapsed = time.monotonic() - t0
-        log.info("FasterWhisper transcribed in %.2fs: %s", elapsed, text)
+        log.info("[%s] transcribed in %.2fs: %s", self._label, elapsed, text)
         return text

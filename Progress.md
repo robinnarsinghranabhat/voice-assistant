@@ -67,9 +67,26 @@ IDLE → LISTENING → WAITING_FOR_USER → CAPTURING → PROCESSING → WAITING
 
 ## What's Next
 
-### Local TTS
+### Local TTS ([PocketTTS.cpp](https://github.com/VolgaGerm/PocketTTS.cpp))
 - Add pocket-tts running in streaming-server mode as a local TTS backend
 - Compare latency vs OpenAI TTS API (log timestamps already in place)
+
+#### Running pocket-tts server
+```bash
+cd _internals/PocketTTS.cpp
+./pocket-tts --server --port 9000
+```
+
+#### Test with curl
+```bash
+curl -s http://localhost:9000/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"input": "Hello world", "voice": "output"}' \
+  --output test.wav && afplay test.wav
+```
+- `voice` — filename (without path) from `_internals/PocketTTS.cpp/voices/`. PocketTTS clones that voice sample. Add your own `.wav` files there to use different voices.
+- `input` — text to speak
+- `response_format` — `wav` (default) or `pcm`
 
 ### Voice UX Improvements
 - First sentence should be spoken immediately (low time-to-first-audio), then bundle subsequent sentences into fewer TTS calls to reduce per-sentence API overhead

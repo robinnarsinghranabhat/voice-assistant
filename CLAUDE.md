@@ -83,7 +83,9 @@ voice_assistant/
 
 ## Environment Variables
 
-- `OPENAI_API_KEY` — Required for Whisper STT and TTS
+- `STT_BACKEND` — `faster-whisper` (default) or `openai`
+- `TTS_BACKEND` — `pocket` (default) or `openai`
+- `OPENAI_API_KEY` — Required for Whisper STT and OpenAI TTS
 - `CLOUD_ML_REGION` — Vertex AI region (default: `us-east5`)
 - `ANTHROPIC_VERTEX_PROJECT_ID` — Google Cloud project ID for Vertex AI
 - `CLAUDE_MODEL` — Claude model ID (default: `claude-sonnet-4-6`)

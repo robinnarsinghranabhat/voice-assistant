@@ -27,12 +27,8 @@ from voice_assistant.ai_agent import ClaudeChat
 from voice_assistant.audio_capture import AudioCapture
 from voice_assistant.orchestrator import Orchestrator
 from voice_assistant.ring_buffer import RingBuffer
-from voice_assistant.stt import OpenAISTT
-from voice_assistant.tts import OpenAITTS
 from voice_assistant.vad import VoiceActivityDetector
 from voice_assistant.wake_word import WakeWordDetector
-
-from voice_assistant.stt import FasterWhisperSTT
 
 SAMPLE_RATE = 16000
 
@@ -48,12 +44,30 @@ def main():
     # interrupt_sound = os.path.join(os.path.dirname(__file__), "interrupt.wav")
     interrupt_sound = os.path.join(os.path.dirname(__file__), "freesound_community-swish-sound-94707.mp3")
 
-    # stt = OpenAISTT()
-    # Lot less Latency Observed
-    stt = FasterWhisperSTT(model_size="base") # "base" or "small", "medium", "large-v3"
+    stt_backend = os.environ.get("STT_BACKEND", "faster-whisper")
+    if stt_backend == "openai":
+        from voice_assistant.stt import OpenAISTT
+        stt = OpenAISTT()
+    elif stt_backend == "faster-whisper":
+        from voice_assistant.stt import FasterWhisperSTT
+        stt = FasterWhisperSTT(model_size="base")
+    else:
+        raise ValueError(f"Unknown STT_BACKEND: {stt_backend}")
+
     chat = ClaudeChat()
-    tts = OpenAITTS()
+
+    tts_backend = os.environ.get("TTS_BACKEND", "pocket")
+    if tts_backend == "openai":
+        from voice_assistant.tts import OpenAITTS
+        tts = OpenAITTS()
+    elif tts_backend == "pocket":
+        from voice_assistant.tts import PocketTTS
+        tts = PocketTTS()
+    else:
+        raise ValueError(f"Unknown TTS_BACKEND: {tts_backend}")
     tts.open_stream()
+
+    log.info("Backends: STT=%s, TTS=%s", stt_backend, tts_backend)
 
     def handle_capture(
         recording: list[np.ndarray],

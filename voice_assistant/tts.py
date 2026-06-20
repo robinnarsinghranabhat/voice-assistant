@@ -17,6 +17,8 @@ class TTS(Protocol):
 
 
 class OpenAITTS:
+    _label = "OpenAITTS"
+
     def __init__(
         self,
         model: str | None = None,
@@ -48,7 +50,7 @@ class OpenAITTS:
         self._stream = None
 
     def speak(self, text: str, interrupt: threading.Event | None = None) -> None:
-        log.info("TTS start: %s", text)
+        log.info("[%s] start: %s", self._label, text)
         t0 = time.monotonic()
         owned_stream = self._stream is None
         if owned_stream:
@@ -62,10 +64,65 @@ class OpenAITTS:
             ) as response:
                 for chunk in response.iter_bytes(chunk_size=4096):
                     if interrupt and interrupt.is_set():
-                        log.info("TTS interrupted after %.2fs", time.monotonic() - t0)
+                        log.info("[%s] interrupted after %.2fs", self._label, time.monotonic() - t0)
                         break
                     self._stream.write(chunk)
         finally:
             if owned_stream:
                 self.close_stream()
-        log.info("TTS done in %.2fs", time.monotonic() - t0)
+        log.info("[%s] done in %.2fs", self._label, time.monotonic() - t0)
+
+
+class PocketTTS:
+    _label = "PocketTTS"
+
+    def __init__(
+        self,
+        base_url: str = "http://localhost:9000",
+        voice: str = "output",
+    ):
+        import httpx
+
+        self._client = httpx.Client(base_url=base_url, timeout=30.0)
+        self._voice = voice
+        self._pa = pyaudio.PyAudio()
+        self._stream: pyaudio.Stream | None = None
+
+    def open_stream(self):
+        if self._stream is not None:
+            return
+        self._stream = self._pa.open(
+            format=pyaudio.paFloat32,
+            channels=1,
+            rate=24000,
+            output=True,
+        )
+
+    def close_stream(self):
+        if self._stream is None:
+            return
+        self._stream.stop_stream()
+        self._stream.close()
+        self._stream = None
+
+    def speak(self, text: str, interrupt: threading.Event | None = None) -> None:
+        log.info("[%s] start: %s", self._label, text)
+        t0 = time.monotonic()
+        owned_stream = self._stream is None
+        if owned_stream:
+            self.open_stream()
+        try:
+            with self._client.stream(
+                "POST",
+                "/tts",
+                json={"text": text, "voice": self._voice},
+            ) as response:
+                for chunk in response.iter_bytes(chunk_size=4096):
+                    if interrupt and interrupt.is_set():
+                        log.info("[%s] interrupted after %.2fs", self._label, time.monotonic() - t0)
+                        break
+                    self._stream.write(chunk)
+        finally:
+            if owned_stream:
+                self.close_stream()
+        log.info("[%s] done in %.2fs", self._label, time.monotonic() - t0)
