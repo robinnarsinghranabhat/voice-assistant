@@ -20,7 +20,7 @@ class WakeWordDetector:
             return False
         frame = self._accumulator[:CHUNK_SIZE]
         self._accumulator = self._accumulator[CHUNK_SIZE:]
-        print("WAKE WORD CALLED")
+        # print("WAKE WORD CALLED")
         _test_ = self._model.predict(frame)
         for name in self._model_names:
             scores = list(self._model.prediction_buffer[name])

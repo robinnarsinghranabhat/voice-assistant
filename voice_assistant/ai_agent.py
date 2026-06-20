@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import threading
+import time
 from collections.abc import Iterator
 from typing import Protocol, runtime_checkable
+
+log = logging.getLogger("ai_agent")
 
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
@@ -58,6 +62,8 @@ class ClaudeChat:
         self, user_message: str, interrupt: threading.Event | None = None
     ) -> Iterator[str]:
         self._history.append({"role": "user", "content": user_message})
+        log.info("Streaming started")
+        t0 = time.monotonic()
 
         full_response = ""
         buffer = ""
@@ -80,12 +86,15 @@ class ClaudeChat:
                     buffer = buffer[match.end() :]
                     if sentence:
                         full_response += sentence + " "
+                        log.info("Sentence at %.2fs: %s", time.monotonic() - t0, sentence)
                         yield sentence
 
         remaining = buffer.strip()
         if remaining and not (interrupt and interrupt.is_set()):
             full_response += remaining
+            log.info("Final sentence at %.2fs: %s", time.monotonic() - t0, remaining)
             yield remaining
 
+        log.info("Streaming done in %.2fs", time.monotonic() - t0)
         if full_response.strip():
             self._history.append({"role": "assistant", "content": full_response.strip()})

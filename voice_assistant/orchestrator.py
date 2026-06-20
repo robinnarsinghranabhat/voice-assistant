@@ -1,9 +1,12 @@
 import enum
+import logging
 import threading
 import time
 from collections.abc import Callable
 
 import numpy as np
+
+log = logging.getLogger("orchestrator")
 
 from voice_assistant.audio_playback import play_audio
 from voice_assistant.debug_utils import save_captured_audio
@@ -30,7 +33,7 @@ WAKE_WORD_LOOKBACK_MS = 2000
 SILENCE_RESET_FRAMES = 30 # Look at 512 * 20 Frames
 WAKE_WORD_CHUNK_SIZE = 1280
 CAPTURE_CONFIRM_FRAMES = 20
-CAPTURE_LOOKBACK_MS = 500
+CAPTURE_LOOKBACK_MS = 800 # 500
 
 
 class Orchestrator:
@@ -40,12 +43,14 @@ class Orchestrator:
         wake_word: WakeWordDetector,
         debug: bool = False,
         greeting_audio: str | None = None,
+        interrupt_audio: str | None = None,
         on_capture_complete: Callable[[list[np.ndarray], int, threading.Event], None] | None = None,
     ):
         self.state = State.IDLE
         self._ring_buffer = ring_buffer
         self._wake_word = wake_word
         self._greeting_audio = greeting_audio
+        self._interrupt_audio = interrupt_audio
         self._on_capture_complete = on_capture_complete
         self._recording: list[np.ndarray] = []
         self._last_speech_time: float = 0.0
@@ -82,7 +87,7 @@ class Orchestrator:
             self._handle_processing(vad_result, chunk)
 
     def _transition(self, new_state: State):
-        print(f"  [{self.state.value}] → [{new_state.value}]")
+        log.info("%s → %s", self.state.value, new_state.value)
         self.state = new_state
         self._state_entered_time = time.monotonic()
 
@@ -93,11 +98,22 @@ class Orchestrator:
                 on_start=lambda dur: self.notify_playback_start(dur),
             )
 
+    def _on_interrupt(self):
+        self._interrupt.set()
+        self._wake_word.reset()
+        self._consecutive_speech = 0
+        if self._interrupt_audio:
+            play_audio(
+                self._interrupt_audio,
+                on_start=lambda dur: self.notify_playback_start(dur),
+            )
+        self._transition(State.WAITING_FOR_USER)
+
     def _handle_idle(self, result: VADResult, chunk: np.ndarray):
         # Gate: only enter LISTENING after sustained speech, not a single noisy frame.
         # Wake word model stays off here to save compute.
         if result.is_speech:
-            print(result)
+            log.debug("VAD speech: %.3f", result.confidence)
             self._consecutive_speech += 1
         else:
             self._consecutive_speech = 0
@@ -121,13 +137,13 @@ class Orchestrator:
                 frame = lookback[i : i + WAKE_WORD_CHUNK_SIZE]
                 if len(frame) == WAKE_WORD_CHUNK_SIZE:
                     if self._wake_word.process(frame):
-                        print("Wake word detected!")
+                        log.info("Wake word detected (lookback)")
                         self._transition(State.WAITING_FOR_USER)
                         return
 
         detected = self._wake_word.process(chunk)
         if detected:
-            print("Wake word detected!")
+            log.info("Wake word detected (live)")
             self._on_wake_word_detected()
             self._transition(State.WAITING_FOR_USER)
             return
@@ -157,7 +173,7 @@ class Orchestrator:
             self._consecutive_speech = 0
 
         if self._consecutive_speech >= CAPTURE_CONFIRM_FRAMES:
-            print("Speech confirmed — capturing...")
+            log.info("Speech confirmed — capturing")
             self._consecutive_speech = 0
             lookback = self._ring_buffer.read_last(CAPTURE_LOOKBACK_MS)
             self._recording = [lookback]
@@ -167,7 +183,7 @@ class Orchestrator:
 
         # After IDLE_TIMEOUT_S seconds, automatically switch to IDLE mode 
         if now - self._state_entered_time > IDLE_TIMEOUT_S:
-            print("No speech detected, going back to idle.")
+            log.info("No speech detected, going back to idle")
             self._transition(State.IDLE)
 
     def _handle_capturing(self, vad_result: VADResult | None, chunk: np.ndarray):
@@ -188,7 +204,7 @@ class Orchestrator:
         if now - self._last_speech_time >= SILENCE_TIMEOUT_S:
             total_samples = sum(len(c) for c in self._recording)
             duration = total_samples / SAMPLE_RATE
-            print(f"Captured {duration:.1f}s of audio ({total_samples} samples)")
+            log.info("Captured %.1fs of audio (%d samples)", duration, total_samples)
             # if self._debug:
             #     save_captured_audio(self._recording, SAMPLE_RATE)
             recording = self._recording
@@ -214,7 +230,7 @@ class Orchestrator:
         try:
             self._on_capture_complete(recording, SAMPLE_RATE, self._interrupt)
         except Exception as e:
-            print(f"Processing error: {e}")
+            log.error("Processing error: %s", e)
         self._processing_done = True
 
     def _handle_processing(self, vad_result: VADResult | None, chunk: np.ndarray):
@@ -242,19 +258,10 @@ class Orchestrator:
                 frame = lookback[i : i + WAKE_WORD_CHUNK_SIZE]
                 if len(frame) == WAKE_WORD_CHUNK_SIZE:
                     if self._wake_word.process(frame):
-                        self._interrupt.set()
-                        self._wake_word.reset()
-                        self._consecutive_speech = 0
-                        self._transition(State.WAITING_FOR_USER)
+                        self._on_interrupt()
                         return
 
         detected = self._wake_word.process(chunk)
 
         if detected:
-            print("DETECTED WAKE WORD WHILE AI WAS PROCESSING")
-            print("Interrupt — wake word detected during processing")
-            self._interrupt.set()
-            self._wake_word.reset()
-            self._consecutive_speech = 0
-            # self._on_wake_word_detected()
-            self._transition(State.WAITING_FOR_USER)
+            self._on_interrupt()
