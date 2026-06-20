@@ -67,10 +67,27 @@ IDLE → LISTENING → WAITING_FOR_USER → CAPTURING → PROCESSING → WAITING
 
 ## What's Next
 
-### Phase 5: Polish
+### Local TTS
+- Add pocket-tts running in streaming-server mode as a local TTS backend
+- Compare latency vs OpenAI TTS API (log timestamps already in place)
+
+### Voice UX Improvements
+- First sentence should be spoken immediately (low time-to-first-audio), then bundle subsequent sentences into fewer TTS calls to reduce per-sentence API overhead
 - Echo cancellation for speaker mode (currently requires airpods)
-- Tool calling via LLM (the `ChatAgent` protocol supports this — implementation in `ClaudeChat`)
 - **Interrupt phrases**: Support natural stop phrases ("please stop", "ok stop", "got it", "never mind") as interrupt triggers during PROCESSING, instead of requiring the wake word. Could use a lightweight keyword spotter or small STT model running on the interrupt audio.
 - **Separate wake word for interrupt**: Train a custom wake word model specifically for interrupts (e.g. "stop") — distinct from the conversation-start wake word ("Alexa")
 - Configurable wake word
 - Conversation history truncation for long sessions
+
+### UI
+- Give the assistant a visual interface (transcript view, state indicator, waveform, controls)
+
+### Swappable Backends
+- All backends (STT, LLM, TTS) use `typing.Protocol` — keep this as new backends are added
+- LLM: add OpenAI (GPT), local models (ollama/llama.cpp) as `ChatAgent` implementations
+- STT: OpenAI Whisper API and FasterWhisper (local) already swappable
+- TTS: OpenAI API done, pocket-tts (local) next
+- Tool calling should work across LLM backends via the `ChatAgent` protocol
+
+### Phase 5: Polish
+- Tool calling via LLM (the `ChatAgent` protocol supports this — implementation in `ClaudeChat`)
